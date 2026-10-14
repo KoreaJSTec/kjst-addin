@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KJST 도번 대문자</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 16px; color: #1f2937; font-size: 13px; line-height: 1.5; }
+    h1 { font-size: 16px; margin: 0 0 12px; }
+    .status { padding: 10px 12px; border-radius: 6px; background: #f3f4f6; margin-bottom: 12px; }
+    .status.ok { background: #e7f5ec; color: #1e6b3a; }
+    .status.warn { background: #fdecec; color: #9c0006; }
+    ul { padding-left: 18px; margin: 8px 0 12px; }
+    button { padding: 6px 12px; border: 1px solid #2f69bf; background: #fff; color: #2f69bf; border-radius: 4px; cursor: pointer; }
+    #log { margin-top: 12px; font-size: 11px; color: #6b7280; max-height: 160px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>도번 자동 대문자</h1>
+  <div id="status" class="status">연결 중…</div>
+  <ul>
+    <li>'도면 번호' 칸에 입력하면 공백을 지우고 대문자로 바꿉니다. 예) 30ms-1025-r3 → 30MS-1025-R3</li>
+    <li>이 창을 한 번 열면 이 파일을 열 때마다 자동으로 켜집니다. 창은 닫아도 됩니다.</li>
+  </ul>
+  <button id="retry">다시 연결</button>
+  <div id="log"></div>
+  <script src="taskpane.js"></script>
+</body>
+</html>
