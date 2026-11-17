@@ -3,7 +3,7 @@
  *
  * 도면관리대장(01_도면MASTER 시트, DrawingMasterTable 표)의 A~AA열에
  * 값이 입력되면 즉시 정리합니다.
- *   - 모든 칸: 영어 소문자 -> 대문자
+ *   - 모든 칸: 영어 소문자 -> 대문자 ('비고' 칸은 제외, 입력한 그대로)
  *   - '도면 번호' 칸: 공백도 함께 제거        예) 30ms-1025-r3   ->  30MS-1025-R3
  *   - '도면명' 칸: 작은따옴표·큰따옴표 제거    예) base "plate"   ->  BASE PLATE
  *   - 수식이 들어 있는 칸(자동 칸)은 건드리지 않음
@@ -17,6 +17,7 @@ var TABLE_NAME = "DrawingMasterTable";
 var COLUMN_RANGE = "A:AA";          // 정리 대상 열 범위
 var NUMBER_COLUMN = "도면 번호";      // 공백 제거 + 대문자
 var NAME_COLUMN = "도면명";           // 따옴표 제거 + 대문자
+var SKIP_COLUMNS = ["비고"];          // 자동 변환하지 않는 열 (입력한 그대로 둠)
 
 // 제거할 따옴표: ' " 와 워드/한글에서 붙여 넣을 때 생기는 둥근 따옴표 ‘ ’ “ ”
 var QUOTES = /['"‘’“”]/g;
@@ -80,7 +81,7 @@ function register() {
 
 /* 열 이름에 따라 입력값 정리 */
 function normalize(v, columnName) {
-  if (typeof v !== "string") {
+  if (typeof v !== "string" || SKIP_COLUMNS.indexOf(columnName) !== -1) {
     return v;
   }
   if (columnName === NUMBER_COLUMN) {
