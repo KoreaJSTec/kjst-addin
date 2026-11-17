@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>KJST 도번 대문자</title>
+  <title>KJST-ADDIN</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
   <style>
     body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; margin: 16px; color: #1f2937; font-size: 13px; line-height: 1.5; }
@@ -17,14 +17,16 @@
   </style>
 </head>
 <body>
-  <h1>도번 자동 대문자</h1>
+  <h1>KJST-ADDIN</h1>
   <div id="status" class="status">연결 중…</div>
   <ul>
-    <li>'도면 번호' 칸에 입력하면 공백을 지우고 대문자로 바꿉니다. 예) 30ms-1025-r3 → 30MS-1025-R3</li>
+    <li>A~AA열에 입력한 영어는 모두 대문자로 바뀝니다. 자동(수식) 칸은 건드리지 않습니다.</li>
+    <li>'도면 번호' 칸은 공백도 지웁니다. 예) 30ms-1025-r3 → 30MS-1025-R3</li>
+    <li>'도면명' 칸은 작은따옴표·큰따옴표를 지웁니다. 예) base "plate" → BASE PLATE</li>
     <li>이 창을 한 번 열면 이 파일을 열 때마다 자동으로 켜집니다. 창은 닫아도 됩니다.</li>
   </ul>
   <button id="retry">다시 연결</button>
   <div id="log"></div>
-  <script src="taskpane.js"></script>
+  <script src="taskpane.js?v=1.1"></script>
 </body>
 </html>

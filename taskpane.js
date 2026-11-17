@@ -1,19 +1,28 @@
 /*
- * KJST 도번 자동 대문자 (Office Add-in, shared runtime)
+ * KJST-ADDIN (Office Add-in, shared runtime)
  *
- * 도면관리대장(01_도면MASTER 시트, DrawingMasterTable 표)의 '도면 번호' 열에
- * 값이 입력되면 즉시 공백을 지우고 대문자로 바꿉니다.
- *   예) 30ms-1025-r3  ->  30MS-1025-R3
+ * 도면관리대장(01_도면MASTER 시트, DrawingMasterTable 표)의 A~AA열에
+ * 값이 입력되면 즉시 정리합니다.
+ *   - 모든 칸: 영어 소문자 -> 대문자
+ *   - '도면 번호' 칸: 공백도 함께 제거        예) 30ms-1025-r3   ->  30MS-1025-R3
+ *   - '도면명' 칸: 작은따옴표·큰따옴표 제거    예) base "plate"   ->  BASE PLATE
+ *   - 수식이 들어 있는 칸(자동 칸)은 건드리지 않음
  *
- * 처음 한 번 리본의 [도번 대문자] 버튼을 누르면 "이 파일을 열 때 자동 실행"이
+ * 처음 한 번 리본의 [KJST-ADDIN] 버튼을 누르면 "이 파일을 열 때 자동 실행"이
  * 파일에 저장되어, 그 뒤로는 파일만 열면 백그라운드에서 동작합니다.
  */
 
 var SHEET_NAME = "01_도면MASTER";
 var TABLE_NAME = "DrawingMasterTable";
-var COLUMN_NAME = "도면 번호";
+var COLUMN_RANGE = "A:AA";          // 정리 대상 열 범위
+var NUMBER_COLUMN = "도면 번호";      // 공백 제거 + 대문자
+var NAME_COLUMN = "도면명";           // 따옴표 제거 + 대문자
+
+// 제거할 따옴표: ' " 와 워드/한글에서 붙여 넣을 때 생기는 둥근 따옴표 ‘ ’ “ ”
+var QUOTES = /['"‘’“”]/g;
 
 var registeredFor = null; // 이벤트를 등록한 시트 (중복 등록 방지)
+var ON_TEXT = "켜짐 — A~AA열의 영어는 대문자로, 도면명의 따옴표는 자동으로 지워집니다.";
 
 Office.onReady(function (info) {
   if (info.host !== Office.HostType.Excel) {
@@ -55,13 +64,13 @@ function register() {
         return;
       }
       if (registeredFor === sheet.id) {
-        setStatus("켜짐 — 도면 번호를 입력하면 자동으로 대문자로 바뀝니다.", "ok");
+        setStatus(ON_TEXT, "ok");
         return;
       }
       sheet.onChanged.add(onChanged);
       return context.sync().then(function () {
         registeredFor = sheet.id;
-        setStatus("켜짐 — 도면 번호를 입력하면 자동으로 대문자로 바뀝니다.", "ok");
+        setStatus(ON_TEXT, "ok");
       });
     });
   }).catch(function (e) {
@@ -69,12 +78,18 @@ function register() {
   });
 }
 
-/* 입력값 정리: 공백 제거 + 대문자 */
-function normalize(v) {
+/* 열 이름에 따라 입력값 정리 */
+function normalize(v, columnName) {
   if (typeof v !== "string") {
     return v;
   }
-  return v.replace(/\s+/g, "").toUpperCase();
+  if (columnName === NUMBER_COLUMN) {
+    return v.replace(/\s+/g, "").toUpperCase();
+  }
+  if (columnName === NAME_COLUMN) {
+    return v.replace(QUOTES, "").trim().toUpperCase();
+  }
+  return v.toUpperCase();
 }
 
 function onChanged(event) {
@@ -84,27 +99,39 @@ function onChanged(event) {
   }
   return Excel.run(function (context) {
     var sheet = context.workbook.worksheets.getItem(SHEET_NAME);
-    var column = sheet.tables.getItem(TABLE_NAME).columns.getItem(COLUMN_NAME).getDataBodyRange();
-    var target = sheet.getRange(event.address).getIntersectionOrNullObject(column);
-    target.load("values");
+    var table = sheet.tables.getItem(TABLE_NAME);
+    var header = table.getHeaderRowRange();
+    header.load("values, columnIndex");
+
+    // 표 데이터 영역 ∩ A~AA열 ∩ 방금 바뀐 칸
+    var area = table.getDataBodyRange().getIntersection(sheet.getRange(COLUMN_RANGE));
+    var target = area.getIntersectionOrNullObject(sheet.getRange(event.address));
+    target.load("values, formulas, columnIndex");
+
     return context.sync().then(function () {
       if (target.isNullObject) {
         return;
       }
-      var dirty = false;
-      var out = target.values.map(function (row) {
-        return row.map(function (v) {
-          var n = normalize(v);
-          if (n !== v) {
-            dirty = true;
+      var names = header.values[0];
+      var changed = 0;
+      for (var i = 0; i < target.values.length; i++) {
+        for (var j = 0; j < target.values[i].length; j++) {
+          var f = target.formulas[i][j];
+          if (typeof f === "string" && f.charAt(0) === "=") {
+            continue; // 자동(수식) 칸은 그대로
           }
-          return n;
-        });
-      });
-      if (!dirty) {
-        return; // 이미 대문자면 아무것도 하지 않음 (무한 반복 방지)
+          var v = target.values[i][j];
+          var name = names[target.columnIndex + j - header.columnIndex];
+          var n = normalize(v, name);
+          if (n !== v) {
+            target.getCell(i, j).values = [[n]];
+            changed++;
+          }
+        }
       }
-      target.values = out;
+      if (!changed) {
+        return; // 바꿀 것이 없으면 아무것도 하지 않음 (무한 반복 방지)
+      }
       return context.sync();
     });
   }).catch(function (e) {
