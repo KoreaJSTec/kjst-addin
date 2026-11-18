@@ -5,8 +5,10 @@
  * 값이 입력되면 즉시 정리합니다.
  *   - 모든 칸: 영어 소문자 -> 대문자 ('비고' 칸은 제외, 입력한 그대로)
  *   - '도면 번호' 칸: 공백도 함께 제거        예) 30ms-1025-r3   ->  30MS-1025-R3
- *   - '도면명' 칸: 작은따옴표·큰따옴표 제거    예) base "plate"   ->  BASE PLATE
+ *   - '도면 이름' 칸: 작은따옴표·큰따옴표 제거  예) base "plate"   ->  BASE PLATE
  *   - 수식이 들어 있는 칸(자동 칸)은 건드리지 않음
+ *   - '도면 유형' 칸: 값이 지워졌거나, 도면 번호가 비었거나 P 도면이 아닌데 값이 남아 있으면
+ *     원래 수식으로 되돌림 (P 도면에서 고른 제관도/주물제작도는 그대로)
  *
  * 처음 한 번 리본의 [KJST-ADDIN] 버튼을 누르면 "이 파일을 열 때 자동 실행"이
  * 파일에 저장되어, 그 뒤로는 파일만 열면 백그라운드에서 동작합니다.
@@ -15,20 +17,30 @@
 var SHEET_NAME = "01_도면MASTER";
 var TABLE_NAME = "DrawingMasterTable";
 var COLUMN_RANGE = "A:AA";          // 정리 대상 열 범위
-var NUMBER_COLUMN = "도면 번호";      // 공백 제거 + 대문자
-var NAME_COLUMN = "도면명";           // 따옴표 제거 + 대문자
-var SKIP_COLUMNS = ["비고"];          // 자동 변환하지 않는 열 (입력한 그대로 둠)
+var VERSION = "1.1.3";              // 작업창 제목 옆에 표시 (어떤 버전이 동작하는지 확인용)
+// 열 이름은 띄어쓰기를 무시하고 비교합니다 ("도면 이름" = "도면이름")
+var NUMBER_COLUMNS = ["도면번호"];          // 공백 제거 + 대문자
+var NAME_COLUMNS = ["도면이름", "도면명"];  // 따옴표 제거 + 대문자
+var SKIP_COLUMNS = ["비고"];                // 자동 변환하지 않는 열 (입력한 그대로 둠)
+var TYPE_COLUMNS = ["도면유형"];            // 수식 칸. P 도면만 제관도/주물제작도를 골라 값으로 둠
+// 도면 유형 수식 (R1C1). 표 안의 다른 '도면 유형' 칸에서 수식을 못 찾을 때만 사용
+var TYPE_FORMULA_R1C1 = '=IF(RC7="","",IF(MID(RC7,6+(LEFT(RC7,1)="K"),1)="A","ASSY",' +
+  'IF(MID(RC7,6+(LEFT(RC7,1)="K"),1)="P","제관/주물 선택","PART")))';
 
 // 제거할 따옴표: ' " 와 워드/한글에서 붙여 넣을 때 생기는 둥근 따옴표 ‘ ’ “ ”
 var QUOTES = /['"‘’“”]/g;
 
 var registeredFor = null; // 이벤트를 등록한 시트 (중복 등록 방지)
-var ON_TEXT = "켜짐 — A~AA열의 영어는 대문자로, 도면명의 따옴표는 자동으로 지워집니다.";
+var ON_TEXT = "켜짐 (v" + VERSION + ") — A~AA열의 영어는 대문자로, 도면 이름의 따옴표는 자동으로 지워집니다.";
 
 Office.onReady(function (info) {
   if (info.host !== Office.HostType.Excel) {
     setStatus("엑셀에서만 동작합니다.", "warn");
     return;
+  }
+  var ver = document.getElementById("ver");
+  if (ver) {
+    ver.textContent = "v" + VERSION;
   }
   enableAutoLoad();
   register();
@@ -80,14 +92,19 @@ function register() {
 }
 
 /* 열 이름에 따라 입력값 정리 */
+function colKey(name) {
+  return String(name == null ? "" : name).replace(/\s+/g, "");
+}
+
 function normalize(v, columnName) {
-  if (typeof v !== "string" || SKIP_COLUMNS.indexOf(columnName) !== -1) {
+  var key = colKey(columnName);
+  if (typeof v !== "string" || SKIP_COLUMNS.indexOf(key) !== -1) {
     return v;
   }
-  if (columnName === NUMBER_COLUMN) {
+  if (NUMBER_COLUMNS.indexOf(key) !== -1) {
     return v.replace(/\s+/g, "").toUpperCase();
   }
-  if (columnName === NAME_COLUMN) {
+  if (NAME_COLUMNS.indexOf(key) !== -1) {
     return v.replace(QUOTES, "").trim().toUpperCase();
   }
   return v.toUpperCase();
@@ -107,7 +124,7 @@ function onChanged(event) {
     // 표 데이터 영역 ∩ A~AA열 ∩ 방금 바뀐 칸
     var area = table.getDataBodyRange().getIntersection(sheet.getRange(COLUMN_RANGE));
     var target = area.getIntersectionOrNullObject(sheet.getRange(event.address));
-    target.load("values, formulas, columnIndex");
+    target.load("values, formulas, columnIndex, columnCount, rowIndex, rowCount");
 
     return context.sync().then(function () {
       if (target.isNullObject) {
@@ -130,13 +147,78 @@ function onChanged(event) {
           }
         }
       }
-      if (!changed) {
-        return; // 바꿀 것이 없으면 아무것도 하지 않음 (무한 반복 방지)
-      }
-      return context.sync();
+      var after = changed ? context.sync() : Promise.resolve();
+      return after.then(function () {
+        return fixType(context, sheet, table, names, header.columnIndex, target);
+      });
     });
   }).catch(function (e) {
     log("변환 실패 (" + event.address + "): " + e.message);
+  });
+}
+
+/* P 도면인지 (도면 번호의 기종·UNIT 다음 글자가 P) */
+function isP(no) {
+  var s = String(no == null ? "" : no).replace(/\s+/g, "").toUpperCase();
+  var k = s.charAt(0) === "K" ? 1 : 0;
+  return s.charAt(5 + k) === "P";
+}
+
+/* 도면 유형 칸이 수식이어야 하는지 (true = 원래 수식으로 되돌림) */
+function needTypeFormula(no, typeFormula) {
+  var isFormula = typeof typeFormula === "string" && typeFormula.charAt(0) === "=";
+  if (isFormula) {
+    return false;
+  }
+  var empty = typeFormula === "" || typeFormula == null;
+  var noEmpty = String(no == null ? "" : no).replace(/\s+/g, "") === "";
+  return empty || noEmpty || !isP(no);
+}
+
+/* 도면 번호 / 도면 유형이 바뀐 행의 도면 유형 칸 정리 */
+function fixType(context, sheet, table, names, headerCol, target) {
+  var numIdx = -1, typeIdx = -1;
+  for (var c = 0; c < names.length; c++) {
+    var key = colKey(names[c]);
+    if (NUMBER_COLUMNS.indexOf(key) !== -1) numIdx = c;
+    if (TYPE_COLUMNS.indexOf(key) !== -1) typeIdx = c;
+  }
+  if (numIdx < 0 || typeIdx < 0) {
+    return Promise.resolve();
+  }
+  var numCol = headerCol + numIdx, typeCol = headerCol + typeIdx;
+  var c0 = target.columnIndex, c1 = target.columnIndex + target.columnCount - 1;
+  var touches = function (col) { return col >= c0 && col <= c1; };
+  if (!touches(numCol) && !touches(typeCol)) {
+    return Promise.resolve();
+  }
+  var nums = sheet.getRangeByIndexes(target.rowIndex, numCol, target.rowCount, 1);
+  var types = sheet.getRangeByIndexes(target.rowIndex, typeCol, target.rowCount, 1);
+  var column = table.columns.getItemAt(typeIdx).getDataBodyRange();
+  nums.load("values");
+  types.load("formulas");
+  column.load("formulasR1C1");
+  return context.sync().then(function () {
+    var r1c1 = TYPE_FORMULA_R1C1;
+    var all = column.formulasR1C1;
+    for (var k = 0; k < all.length; k++) {
+      var f = all[k][0];
+      if (typeof f === "string" && f.indexOf("=IF(") === 0 && f.indexOf("PART") !== -1) {
+        r1c1 = f;
+        break;
+      }
+    }
+    var fixed = 0;
+    for (var i = 0; i < target.rowCount; i++) {
+      if (needTypeFormula(nums.values[i][0], types.formulas[i][0])) {
+        types.getCell(i, 0).formulasR1C1 = [[r1c1]];
+        fixed++;
+      }
+    }
+    if (fixed) {
+      log("도면 유형 " + fixed + "칸을 원래 수식으로 되돌림");
+      return context.sync();
+    }
   });
 }
 
@@ -161,5 +243,5 @@ function log(text) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { normalize: normalize };
+  module.exports = { normalize: normalize, needTypeFormula: needTypeFormula, isP: isP, onChanged: onChanged, VERSION: VERSION };
 }
